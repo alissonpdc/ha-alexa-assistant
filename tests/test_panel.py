@@ -84,6 +84,11 @@ def test_panel_js_contains_refined_ux_model():
     # Assert dynamic device types filtered by active area
     assert "areaScopedEntities" in content
 
+    # Assert bug fixes: aliases_v2 support and no flickering on set hass
+    assert "entry.aliases_v2" in content
+    assert "activeId" in content
+    assert "activeVal" in content
+
 
 async def test_async_unregister_alexa_panel_removes_panel(setup_mock_ha_modules):
     """Verify panel unregistration removes panel from frontend."""

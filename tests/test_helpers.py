@@ -76,3 +76,22 @@ def test_get_entity_alexa_aliases_returns_up_to_max_sanitized():
         "Área Externa",
         "Luz 5",
     ]
+
+
+def test_get_entity_alexa_aliases_supports_aliases_v2_with_none_and_strings():
+    """Verify get_entity_alexa_aliases handles aliases_v2 containing null and strings."""
+    hass = MagicMock()
+    mock_registry = MagicMock()
+    mock_entry = MagicMock()
+    mock_entry.aliases = []
+    mock_entry.aliases_v2 = [None, "Luz-Principal", "Spot_Teto"]
+    mock_registry.async_get.return_value = mock_entry
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "custom_components.alexa_assistant.helpers.get_entity_registry",
+            lambda h: mock_registry,
+        )
+        aliases = get_entity_alexa_aliases(hass, "light.sala")
+
+    assert aliases == ["Luz Principal", "Spot Teto"]

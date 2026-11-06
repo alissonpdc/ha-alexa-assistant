@@ -91,6 +91,9 @@ class NativeAlexaExposeManager:
         self._unsub_listener: Callable[[], None] | None = None
         self._orig_discovery: Callable[..., Any] | None = None
         self._orig_load_entity: Callable[..., Any] | None = None
+        self._orig_friendly_name: Any = None
+        self._alexa_entity_class: type | None = None
+        self._alexa_directive_class: type | None = None
 
     def apply_patch_to_class(self, target_class: type) -> None:
         """Patch should_expose on target_class to use is_entity_exposed.
@@ -119,9 +122,34 @@ class NativeAlexaExposeManager:
             _LOGGER.debug("Restored original should_expose on %s", target_class.__name__)
 
     def patch_discovery_and_directives(self) -> None:
-        """Patch Alexa discovery and directive load_entity for sanitization and aliases."""
+        """Patch Alexa discovery, entity friendly_name and directive load_entity."""
         hass_ref = self._hass
 
+        # 1. Patch AlexaEntity.friendly_name so base endpoint keeps its original name
+        try:
+            from homeassistant.components.alexa.entities import AlexaEntity
+
+            self._alexa_entity_class = AlexaEntity
+            self._orig_friendly_name = getattr(AlexaEntity, "friendly_name", None)
+
+            def _patched_friendly_name(alexa_self: Any) -> str:
+                name: str | None = getattr(alexa_self, "entity_conf", {}).get("name")
+                if name is None:
+                    entity = getattr(alexa_self, "entity", None)
+                    if entity is not None and hasattr(entity, "name") and entity.name:
+                        name = entity.name
+                    elif hasattr(alexa_self, "entity_id"):
+                        name = alexa_self.entity_id
+                    else:
+                        name = "device"
+                return sanitize_alexa_name(name)
+
+            setattr(AlexaEntity, "friendly_name", property(_patched_friendly_name))
+            _LOGGER.debug("Successfully patched AlexaEntity.friendly_name")
+        except Exception as err:
+            _LOGGER.debug("Could not patch AlexaEntity.friendly_name: %s", err)
+
+        # 2. Patch Alexa.Discovery handler to append cloned endpoints for aliases
         try:
             from homeassistant.components.alexa.handlers import HANDLERS
 
@@ -131,9 +159,21 @@ class NativeAlexaExposeManager:
 
                 async def _patched_discovery(hass: Any, config: Any, directive: Any, context: Any) -> Any:
                     response = await self._orig_discovery(hass, config, directive, context)
-                    if hasattr(response, "payload") and "endpoints" in response.payload:
-                        response.payload["endpoints"] = process_discovery_endpoints(
-                            hass_ref, response.payload["endpoints"]
+                    payload: dict[str, Any] | None = None
+
+                    if hasattr(response, "_response") and isinstance(response._response, dict):
+                        payload = response._response.get("event", {}).get("payload")
+                    elif hasattr(response, "payload") and isinstance(response.payload, dict):
+                        payload = response.payload
+                    elif isinstance(response, dict):
+                        if "event" in response and isinstance(response["event"], dict):
+                            payload = response["event"].get("payload")
+                        elif "payload" in response and isinstance(response["payload"], dict):
+                            payload = response["payload"]
+
+                    if payload is not None and "endpoints" in payload and isinstance(payload["endpoints"], list):
+                        payload["endpoints"] = process_discovery_endpoints(
+                            hass_ref, payload["endpoints"]
                         )
                     return response
 
@@ -142,25 +182,50 @@ class NativeAlexaExposeManager:
         except Exception as err:
             _LOGGER.debug("Could not patch Alexa.Discovery handler: %s", err)
 
+        # 3. Patch AlexaDirective.load_entity to resolve alias endpointId to base entity_id
         try:
-            from homeassistant.components.alexa.state_report import AlexaDirective
+            alexa_directive_class = None
+            try:
+                from homeassistant.components.alexa.smart_home import AlexaDirective
+                alexa_directive_class = AlexaDirective
+            except ImportError:
+                from homeassistant.components.alexa.state_report import AlexaDirective
+                alexa_directive_class = AlexaDirective
 
-            self._orig_load_entity = AlexaDirective.load_entity
+            if alexa_directive_class is not None:
+                self._alexa_directive_class = alexa_directive_class
+                self._orig_load_entity = alexa_directive_class.load_entity
 
-            def _patched_load_entity(dir_self: Any, hass: Any, config: Any) -> None:
-                if hasattr(dir_self, "_directive") and "endpoint" in dir_self._directive:
-                    ep_data = dir_self._directive["endpoint"]
-                    if "endpointId" in ep_data and "__alias_" in str(ep_data["endpointId"]):
-                        ep_data["endpointId"] = str(ep_data["endpointId"]).split("__alias_")[0]
-                return self._orig_load_entity(dir_self, hass, config)
+                def _patched_load_entity(dir_self: Any, hass: Any, config: Any) -> None:
+                    endpoint_data = None
+                    if hasattr(dir_self, "_directive") and isinstance(dir_self._directive, dict):
+                        endpoint_data = dir_self._directive.get("endpoint")
 
-            AlexaDirective.load_entity = _patched_load_entity
-            _LOGGER.debug("Successfully patched AlexaDirective.load_entity")
+                    if isinstance(endpoint_data, dict) and "endpointId" in endpoint_data:
+                        raw_id = str(endpoint_data["endpointId"])
+                        if "__alias_" in raw_id:
+                            endpoint_data["endpointId"] = raw_id.split("__alias_")[0]
+                            try:
+                                return self._orig_load_entity(dir_self, hass, config)
+                            finally:
+                                endpoint_data["endpointId"] = raw_id
+                    return self._orig_load_entity(dir_self, hass, config)
+
+                alexa_directive_class.load_entity = _patched_load_entity
+                _LOGGER.debug("Successfully patched AlexaDirective.load_entity")
         except Exception as err:
             _LOGGER.debug("Could not patch AlexaDirective.load_entity: %s", err)
 
     def unpatch_discovery_and_directives(self) -> None:
-        """Restore original discovery and directive handlers."""
+        """Restore original discovery, friendly_name, and directive handlers."""
+        if self._alexa_entity_class is not None and self._orig_friendly_name is not None:
+            try:
+                setattr(self._alexa_entity_class, "friendly_name", self._orig_friendly_name)
+            except Exception:
+                pass
+            self._orig_friendly_name = None
+            self._alexa_entity_class = None
+
         if self._orig_discovery is not None:
             try:
                 from homeassistant.components.alexa.handlers import HANDLERS
@@ -170,14 +235,13 @@ class NativeAlexaExposeManager:
                 pass
             self._orig_discovery = None
 
-        if self._orig_load_entity is not None:
+        if self._alexa_directive_class is not None and self._orig_load_entity is not None:
             try:
-                from homeassistant.components.alexa.state_report import AlexaDirective
-
-                AlexaDirective.load_entity = self._orig_load_entity
+                self._alexa_directive_class.load_entity = self._orig_load_entity
             except Exception:
                 pass
             self._orig_load_entity = None
+            self._alexa_directive_class = None
 
     def start_listening(self) -> None:
         """Register active listener for cloud.alexa to activate it in UI.

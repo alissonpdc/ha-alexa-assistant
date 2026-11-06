@@ -40,8 +40,6 @@ class AlexaAssistantPanel extends HTMLElement {
     this._hass = hass;
     if (isFirst) {
       this._loadData();
-    } else {
-      this._render();
     }
   }
 
@@ -87,13 +85,16 @@ class AlexaAssistantPanel extends HTMLElement {
       if (Array.isArray(registryRes)) {
         for (const entry of registryRes) {
           if (!entry.entity_id) continue;
-          if (Array.isArray(entry.aliases)) {
-            this._aliases[entry.entity_id] = entry.aliases
-              .filter(Boolean)
-              .map((a) => this._sanitize(a))
-              .filter(Boolean)
-              .slice(0, 5);
-          }
+          const rawAliases = (Array.isArray(entry.aliases_v2) && entry.aliases_v2.length > 0)
+            ? entry.aliases_v2
+            : (Array.isArray(entry.aliases) ? entry.aliases : []);
+
+          this._aliases[entry.entity_id] = rawAliases
+            .filter((a) => typeof a === "string" && a.trim().length > 0)
+            .map((a) => this._sanitize(a))
+            .filter(Boolean)
+            .slice(0, 5);
+
           if (entry.area_id && areaMap[entry.area_id]) {
             this._areas[entry.entity_id] = areaMap[entry.area_id];
           } else if (entry.device_id && deviceAreaMap[entry.device_id]) {
@@ -286,6 +287,12 @@ class AlexaAssistantPanel extends HTMLElement {
 
   _render() {
     if (!this._hass) return;
+
+    const activeEl = this.shadowRoot ? this.shadowRoot.activeElement : null;
+    const activeId = activeEl ? activeEl.id : null;
+    const activeVal = (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) ? activeEl.value : null;
+    const activeSelStart = activeEl?.selectionStart;
+    const activeSelEnd = activeEl?.selectionEnd;
 
     const allEntities = this._getAllValidEntities();
     const allRooms = Array.from(new Set(allEntities.map((e) => e.area))).sort();
@@ -927,6 +934,19 @@ class AlexaAssistantPanel extends HTMLElement {
     `;
 
     this._bindEvents();
+
+    if (activeId && activeId !== "searchInput") {
+      const restored = this.shadowRoot.getElementById(activeId);
+      if (restored) {
+        if (activeVal !== null && restored.value !== activeVal) {
+          restored.value = activeVal;
+        }
+        restored.focus();
+        if (typeof activeSelStart === "number" && typeof activeSelEnd === "number") {
+          restored.setSelectionRange(activeSelStart, activeSelEnd);
+        }
+      }
+    }
   }
 
   _bindEvents() {

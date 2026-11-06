@@ -69,12 +69,18 @@ def get_entity_alexa_aliases(
         return []
 
     entry = registry.async_get(entity_id)
-    if entry is None or not getattr(entry, "aliases", None):
+    if entry is None:
         return []
 
+    raw_candidates: list[Any] = []
+    if getattr(entry, "aliases_v2", None):
+        raw_candidates.extend(entry.aliases_v2)
+    if getattr(entry, "aliases", None):
+        raw_candidates.extend(entry.aliases)
+
     result: list[str] = []
-    for raw_alias in entry.aliases:
-        if not raw_alias:
+    for raw_alias in raw_candidates:
+        if not isinstance(raw_alias, str) or not raw_alias.strip():
             continue
         cleaned = sanitize_alexa_name(raw_alias)
         if cleaned and cleaned not in result:
