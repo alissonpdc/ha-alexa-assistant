@@ -83,7 +83,7 @@ async def ws_update_aliases(
 
     # Validation: cannot remove the only voice name
     if exclude_default and len(sanitized_aliases) == 0:
-        connection.send_error(msg["id"], "invalid_data", "Não é possível remover o único nome.")
+        connection.send_error(msg["id"], "invalid_data", "Cannot remove the only voice name.")
         return
 
     # 1. Update persistent storage for exclude_default_name

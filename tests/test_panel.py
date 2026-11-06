@@ -91,6 +91,14 @@ def test_panel_js_contains_refined_ux_model():
     assert "activeId" in content
     assert "activeVal" in content
 
+    # Assert add original name button and restore functionality
+    assert "alias-add-original-btn" in content
+    assert "data-restore-entity-id" in content
+    assert "Add name to aliases" in content
+
+    # Assert Unicode letters support in sanitize
+    assert r"\p{L}" in content
+
 
 async def test_async_unregister_alexa_panel_removes_panel(setup_mock_ha_modules):
     """Verify panel unregistration removes panel from frontend."""

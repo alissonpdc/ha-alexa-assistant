@@ -100,7 +100,7 @@ async def test_ws_update_aliases_blocks_empty_when_default_excluded():
     connection.send_error.assert_called_once_with(
         11,
         "invalid_data",
-        "Não é possível remover o único nome.",
+        "Cannot remove the only voice name.",
     )
 
 

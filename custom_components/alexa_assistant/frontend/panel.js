@@ -46,10 +46,17 @@ class AlexaAssistantPanel extends HTMLElement {
 
   _sanitize(name) {
     if (!name) return "";
-    return String(name)
-      .replace(/[^\w\s]|_/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    try {
+      return String(name)
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    } catch {
+      return String(name)
+        .replace(/[^a-zA-Z0-9\u00C0-\u00FF\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
   }
 
   async _loadData() {
@@ -156,7 +163,7 @@ class AlexaAssistantPanel extends HTMLElement {
     const rawVal = aliasInput?.value || "";
     const clean = this._sanitize(rawVal);
     if (!clean) {
-      alert("O nome deve conter apenas letras, números e espaços.");
+      alert("Name must contain only letters, numbers, and spaces.");
       return;
     }
 
@@ -165,7 +172,7 @@ class AlexaAssistantPanel extends HTMLElement {
     const totalNames = (isDefaultExcluded ? 0 : 1) + current.length;
 
     if (totalNames >= 5) {
-      alert("Limite máximo de 5 nomes atingido.");
+      alert("Maximum limit of 5 names reached.");
       return;
     }
 
@@ -174,7 +181,7 @@ class AlexaAssistantPanel extends HTMLElement {
 
     if (defaultName && clean.toLowerCase() === defaultName.toLowerCase()) {
       if (!isDefaultExcluded) {
-        alert("Este nome já está cadastrado.");
+        alert("This name is already registered.");
         return;
       }
       // Re-enable default name
@@ -184,7 +191,7 @@ class AlexaAssistantPanel extends HTMLElement {
     }
 
     if (current.some((a) => a.toLowerCase() === clean.toLowerCase())) {
-      alert("Este nome já está cadastrado.");
+      alert("This alias is already added.");
       return;
     }
 
@@ -199,7 +206,7 @@ class AlexaAssistantPanel extends HTMLElement {
     const totalNames = (isDefaultExcluded ? 0 : 1) + current.length;
 
     if (totalNames <= 1) {
-      alert("Não é possível remover o único nome.");
+      alert("Cannot remove the only name.");
       return;
     }
 
@@ -209,6 +216,21 @@ class AlexaAssistantPanel extends HTMLElement {
       const updated = current.filter((a) => a !== aliasToRemove);
       await this._saveAliases(entityId, updated, isDefaultExcluded);
     }
+  }
+
+  async _restoreDefaultName(entityId) {
+    const isDefaultExcluded = Boolean(this._excludedDefaultNames[entityId]);
+    if (!isDefaultExcluded) return;
+
+    const current = this._aliases[entityId] ? [...this._aliases[entityId]] : [];
+    const totalNames = 1 + current.length;
+
+    if (totalNames > 5) {
+      alert("Maximum limit of 5 names reached.");
+      return;
+    }
+
+    await this._saveAliases(entityId, current, false);
   }
 
   async _saveAliases(entityId, aliases, excludeDefault) {
@@ -234,7 +256,7 @@ class AlexaAssistantPanel extends HTMLElement {
         });
         this._aliases[entityId] = aliases;
       } catch (innerErr) {
-        alert(`Erro ao salvar nomes: ${err?.message || err}`);
+        alert(`Error saving names: ${err?.message || err}`);
       }
     } finally {
       this._updating.delete(entityId);
@@ -711,6 +733,23 @@ class AlexaAssistantPanel extends HTMLElement {
           color: var(--error-color, #f87171);
           opacity: 1;
         }
+        .alias-add-original-btn {
+          background: rgba(0, 229, 255, 0.08);
+          border: 1px dashed var(--panel-pill-border, rgba(0, 229, 255, 0.4));
+          color: var(--panel-pill-text, #00e5ff);
+          font-size: 11px;
+          font-weight: 600;
+          padding: 3px 10px;
+          border-radius: 20px;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          transition: all 0.15s ease;
+        }
+        .alias-add-original-btn:hover {
+          background: var(--panel-pill-bg, rgba(0, 229, 255, 0.18));
+          border-style: solid;
+        }
         .alias-chip {
           background: var(--secondary-background-color, rgba(125, 125, 125, 0.1));
           border: 1px solid var(--divider-color, rgba(125, 125, 125, 0.2));
@@ -958,23 +997,28 @@ class AlexaAssistantPanel extends HTMLElement {
                       ${e.isExposed ? `
                         <div style="margin-top:12px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.06); display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
                           <!-- Microphone icon instead of 'Alias' label -->
-                          <span style="display:inline-flex; align-items:center; color:#00e5ff;" title="Nomes de Voz (Alexa)">
+                          <span style="display:inline-flex; align-items:center; color:#00e5ff;" title="Voice Names (Alexa)">
                             <svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M12 2A3 3 0 0 0 9 5V11A3 3 0 0 0 12 14A3 3 0 0 0 15 11V5A3 3 0 0 0 12 2M19 11C19 14.53 16.39 17.44 13 17.93V21H11V17.93C7.61 17.44 5 14.53 5 11H7A5 5 0 0 0 12 16A5 5 0 0 0 17 11H19Z"/></svg>
                           </span>
 
                           <!-- 1st Item: Clean Entity Name (if not excluded) -->
                           ${!e.isDefaultExcluded ? `
-                            <span class="alias-default-chip" title="Nome original da entidade">
+                            <span class="alias-default-chip" title="Original entity name">
                               <span>${cleanName}</span>
-                              <button class="alias-chip-del" title="Remover nome" data-entity-id="${e.entity_id}" data-is-default="true">×</button>
+                              <button class="alias-chip-del" title="Remove name" data-entity-id="${e.entity_id}" data-is-default="true">×</button>
                             </span>
-                          ` : ""}
+                          ` : `
+                            <button class="alias-add-original-btn" title="Add &quot;${cleanName}&quot; as primary discovery name" data-restore-entity-id="${e.entity_id}">
+                              <svg style="width:12px;height:12px;fill:currentColor;margin-right:4px;" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                              Add name to aliases
+                            </button>
+                          `}
 
                           <!-- Configured secondary aliases -->
                           ${e.aliases.map((alias) => `
                             <span class="alias-chip">
                               <span>${alias}</span>
-                              <button class="alias-chip-del" title="Remover alias" data-entity-id="${e.entity_id}" data-alias="${alias}">×</button>
+                              <button class="alias-chip-del" title="Remove alias" data-entity-id="${e.entity_id}" data-alias="${alias}">×</button>
                             </span>
                           `).join("")}
 
@@ -987,13 +1031,13 @@ class AlexaAssistantPanel extends HTMLElement {
                                 placeholder="+ Add alias..."
                                 data-input-entity-id="${e.entity_id}">
                               <button class="alias-btn-check"
-                                title="Adicionar alias"
+                                title="Add alias"
                                 data-btn-add-entity-id="${e.entity_id}">
                                 <svg style="width:14px;height:14px;fill:currentColor;" viewBox="0 0 24 24"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>
                               </button>
                             </div>
                           ` : `
-                            <span style="font-size:11px; color:#f59e0b; font-style:italic;">5/5 atingido</span>
+                            <span style="font-size:11px; color:#f59e0b; font-style:italic;">${((e.isDefaultExcluded ? 0 : 1) + e.aliases.length)}/5 reached</span>
                           `}
                         </div>
                       ` : ""}
@@ -1085,6 +1129,15 @@ class AlexaAssistantPanel extends HTMLElement {
       cb.addEventListener("change", (e) => {
         const id = e.target.getAttribute("data-entity-id");
         this._toggleEntity(id, e.target.checked);
+      });
+    });
+
+    // Restore default name button
+    const restoreButtons = this.shadowRoot.querySelectorAll("button[data-restore-entity-id]");
+    restoreButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const entityId = btn.getAttribute("data-restore-entity-id");
+        this._restoreDefaultName(entityId);
       });
     });
 
