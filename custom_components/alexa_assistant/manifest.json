@@ -1,0 +1,11 @@
+{
+  "domain": "alexa_assistant",
+  "name": "Alexa Assistant",
+  "codeowners": ["@alissonpdc"],
+  "config_flow": true,
+  "documentation": "https://github.com/alissonpdc/ha-alexa-assistant",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/alissonpdc/ha-alexa-assistant/issues",
+  "version": "1.0.0"
+}

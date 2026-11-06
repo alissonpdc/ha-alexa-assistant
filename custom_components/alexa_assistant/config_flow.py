@@ -1,4 +1,4 @@
-"""Config flow for Alexa Native Expose."""
+"""Config flow for Alexa Assistant."""
 from typing import Any, Optional
 
 try:
@@ -33,8 +33,8 @@ except ImportError:
 from .const import DOMAIN
 
 
-class AlexaNativeExposeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Alexa Native Expose."""
+class AlexaAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for Alexa Assistant."""
 
     VERSION = 1
 
@@ -50,6 +50,6 @@ class AlexaNativeExposeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="single_instance_allowed")
 
         if user_input is not None:
-            return self.async_create_entry(title="Alexa Native Expose", data={})
+            return self.async_create_entry(title="Alexa Assistant", data={})
 
         return self.async_show_form(step_id="user")
