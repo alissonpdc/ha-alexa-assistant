@@ -55,11 +55,12 @@ class AlexaAssistantPanel extends HTMLElement {
     this._loading = true;
     this._render();
     try {
-      const [exposedRes, registryRes, areasRes, devicesRes] = await Promise.all([
+      const [exposedRes, registryRes, areasRes, devicesRes, aliasesRes] = await Promise.all([
         this._hass.callWS({ type: "homeassistant/expose_entity/list" }).catch(() => ({})),
         this._hass.callWS({ type: "config/entity_registry/list" }).catch(() => []),
         this._hass.callWS({ type: "config/area_registry/list" }).catch(() => []),
         this._hass.callWS({ type: "config/device_registry/list" }).catch(() => []),
+        this._hass.callWS({ type: "alexa_assistant/aliases" }).catch(() => ({})),
       ]);
 
       this._exposed = exposedRes?.exposed_entities || {};
@@ -80,20 +81,24 @@ class AlexaAssistantPanel extends HTMLElement {
         }
       }
 
-      this._aliases = {};
+      this._aliases = (aliasesRes && typeof aliasesRes === "object") ? { ...aliasesRes } : {};
       this._areas = {};
       if (Array.isArray(registryRes)) {
         for (const entry of registryRes) {
           if (!entry.entity_id) continue;
-          const rawAliases = (Array.isArray(entry.aliases_v2) && entry.aliases_v2.length > 0)
-            ? entry.aliases_v2
-            : (Array.isArray(entry.aliases) ? entry.aliases : []);
+          if (!this._aliases[entry.entity_id]) {
+            const rawAliases = (Array.isArray(entry.aliases_v2) && entry.aliases_v2.length > 0)
+              ? entry.aliases_v2
+              : (Array.isArray(entry.aliases) ? entry.aliases : []);
 
-          this._aliases[entry.entity_id] = rawAliases
-            .filter((a) => typeof a === "string" && a.trim().length > 0)
-            .map((a) => this._sanitize(a))
-            .filter(Boolean)
-            .slice(0, 5);
+            if (rawAliases.length > 0) {
+              this._aliases[entry.entity_id] = rawAliases
+                .filter((a) => typeof a === "string" && a.trim().length > 0)
+                .map((a) => this._sanitize(a))
+                .filter(Boolean)
+                .slice(0, 5);
+            }
+          }
 
           if (entry.area_id && areaMap[entry.area_id]) {
             this._areas[entry.entity_id] = areaMap[entry.area_id];

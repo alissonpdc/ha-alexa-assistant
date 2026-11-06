@@ -42,7 +42,7 @@ async def async_register_alexa_panel(hass: Any) -> None:
             webcomponent_name=PANEL_NAME,
             sidebar_title=PANEL_TITLE,
             sidebar_icon=PANEL_ICON,
-            module_url=f"{FRONTEND_URL}/panel.js",
+            module_url=f"{FRONTEND_URL}/panel.js?v=1.0.2",
             require_admin=False,
         )
         _LOGGER.info("Registered Alexa Assistant panel in sidebar")

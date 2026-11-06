@@ -12,6 +12,7 @@ except ImportError:
 from .const import DOMAIN
 from .expose import NativeAlexaExposeManager
 from .panel import async_register_alexa_panel, async_unregister_alexa_panel
+from .websocket import async_register_websocket_commands
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     manager.start_listening()
     manager.patch_discovery_and_directives()
+    async_register_websocket_commands(hass)
     hass.data[DOMAIN][entry.entry_id] = manager
     await async_register_alexa_panel(hass)
     _LOGGER.info("Alexa Assistant successfully enabled")

@@ -56,6 +56,7 @@ async def test_async_register_alexa_panel_registers_paths_and_panel(setup_mock_h
     assert mock_reg.call_args[1]["frontend_url_path"] == "alexa-assistant"
     assert mock_reg.call_args[1]["sidebar_title"] == "Alexa"
     assert mock_reg.call_args[1]["sidebar_icon"] == "mdi:speaker-message"
+    assert mock_reg.call_args[1]["module_url"].startswith("/alexa_assistant_panel/panel.js?v=")
 
 
 def test_panel_js_contains_refined_ux_model():
@@ -86,6 +87,7 @@ def test_panel_js_contains_refined_ux_model():
 
     # Assert bug fixes: aliases_v2 support and no flickering on set hass
     assert "entry.aliases_v2" in content
+    assert "alexa_assistant/aliases" in content
     assert "activeId" in content
     assert "activeVal" in content
 
