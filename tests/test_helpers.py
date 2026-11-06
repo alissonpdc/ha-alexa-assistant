@@ -31,6 +31,16 @@ def test_sanitize_alexa_name_strips_special_characters(raw_name: str, expected: 
     assert sanitize_alexa_name(raw_name) == expected
 
 
+def test_sanitize_alexa_name_handles_decomposed_nfd_unicode():
+    """Verify decomposed NFD accents (e.g. from macOS keyboard) compose to NFC without extra spaces."""
+    import unicodedata
+
+    words = ["escritório", "portão", "iluminação", "açúcar", "café", "sótão", "quarto da mãe"]
+    for word in words:
+        decomposed = unicodedata.normalize("NFD", word)
+        assert sanitize_alexa_name(decomposed) == word
+
+
 def test_build_alias_endpoint_creates_unique_endpoint_id():
     """Verify build_alias_endpoint generates proper cloned endpoint."""
     base_endpoint = {

@@ -47,8 +47,10 @@ class AlexaAssistantPanel extends HTMLElement {
   _sanitize(name) {
     if (!name) return "";
     try {
-      return String(name)
-        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      const normalized = String(name).normalize("NFC");
+      return normalized
+        .replace(/[^\p{L}\p{N}\p{M}\s]/gu, " ")
+        .normalize("NFC")
         .replace(/\s+/g, " ")
         .trim();
     } catch {

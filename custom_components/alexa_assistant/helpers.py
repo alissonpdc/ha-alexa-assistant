@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import re
 from typing import Any
+import unicodedata
 
 MAX_ALEXA_ALIASES: int = 5
 
@@ -16,8 +17,10 @@ def sanitize_alexa_name(name: str | None) -> str:
     """
     if not name:
         return ""
+    # Normalize to Unicode NFC to compose decomposed combining marks (e.g. o + combining acute -> ó)
+    normalized = unicodedata.normalize("NFC", str(name))
     # Strip underscores and any non-alphanumeric non-space character
-    cleaned = re.sub(r"[^\w\s]|_", " ", str(name))
+    cleaned = re.sub(r"[^\w\s]|_", " ", normalized)
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
