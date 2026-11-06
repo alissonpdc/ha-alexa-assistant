@@ -199,7 +199,6 @@ def test_patched_alexa_entity_friendly_name_preserves_original_name():
             self.entity.name = name
             self.entity_conf = {}
 
-        @property
         def friendly_name(self):
             return "Overwritten Alias 0"
 
@@ -209,8 +208,8 @@ def test_patched_alexa_entity_friendly_name_preserves_original_name():
         manager.patch_discovery_and_directives()
 
         entity_inst = FakeAlexaEntity("Luz da Sala")
-        # Should now return the actual entity name, not the overwritten alias
-        assert entity_inst.friendly_name == "Luz da Sala"
+        # Should now return the actual entity name when called as a method
+        assert entity_inst.friendly_name() == "Luz da Sala"
 
         manager.unpatch_discovery_and_directives()
-        assert entity_inst.friendly_name == "Overwritten Alias 0"
+        assert entity_inst.friendly_name() == "Overwritten Alias 0"

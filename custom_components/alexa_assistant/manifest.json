@@ -7,5 +7,5 @@
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/alissonpdc/ha-alexa-assistant/issues",
-  "version": "1.0.2"
+  "version": "1.0.3"
 }

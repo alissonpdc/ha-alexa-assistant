@@ -144,7 +144,7 @@ class NativeAlexaExposeManager:
                         name = "device"
                 return sanitize_alexa_name(name)
 
-            setattr(AlexaEntity, "friendly_name", property(_patched_friendly_name))
+            setattr(AlexaEntity, "friendly_name", _patched_friendly_name)
             _LOGGER.debug("Successfully patched AlexaEntity.friendly_name")
         except Exception as err:
             _LOGGER.debug("Could not patch AlexaEntity.friendly_name: %s", err)
