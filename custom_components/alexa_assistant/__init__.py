@@ -12,6 +12,7 @@ except ImportError:
 from .const import DOMAIN
 from .expose import NativeAlexaExposeManager
 from .panel import async_register_alexa_panel, async_unregister_alexa_panel
+from .storage import AlexaAssistantStorage
 from .websocket import async_register_websocket_commands
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,6 +35,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await async_setup_entry(hass, entry)
     """
     hass.data.setdefault(DOMAIN, {})
+
+    # Initialize persistent storage
+    storage = AlexaAssistantStorage(hass)
+    await storage.async_load()
+    hass.data[DOMAIN]["storage"] = storage
+
     manager = NativeAlexaExposeManager(hass)
 
     # Patch AbstractConfig

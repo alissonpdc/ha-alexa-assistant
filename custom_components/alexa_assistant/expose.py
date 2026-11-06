@@ -23,6 +23,7 @@ from .helpers import (
     get_entity_alexa_aliases,
     sanitize_alexa_name,
 )
+from .storage import is_entity_default_name_excluded
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,18 +62,33 @@ def process_discovery_endpoints(
 
     for ep in endpoints:
         ep_copy = copy.deepcopy(ep)
-        raw_name = ep_copy.get("friendlyName", "")
-        sanitized = sanitize_alexa_name(raw_name)
-        ep_copy["friendlyName"] = sanitized or ep_copy.get("endpointId", "device")
-        result.append(ep_copy)
-
         entity_id = resolve_directive_entity_id(ep_copy.get("endpointId", ""))
         aliases = get_entity_alexa_aliases(hass, entity_id)
+        default_excluded = is_entity_default_name_excluded(hass, entity_id)
 
-        for i, alias in enumerate(aliases):
-            if alias and alias != ep_copy["friendlyName"]:
-                alias_ep = build_alias_endpoint(ep_copy, alias, i + 1)
+        raw_name = ep_copy.get("friendlyName", "")
+        clean_default_name = sanitize_alexa_name(raw_name) or ep_copy.get("endpointId", "device")
+
+        if default_excluded and aliases:
+            # Native name is excluded: primary endpoint takes the first alias
+            ep_copy["friendlyName"] = aliases[0]
+            ep_copy["description"] = f"{aliases[0]} via Home Assistant"
+            result.append(ep_copy)
+
+            # Subsequent aliases become alias endpoints
+            for i, alias in enumerate(aliases[1:], start=1):
+                alias_ep = build_alias_endpoint(ep_copy, alias, i)
                 result.append(alias_ep)
+        else:
+            # Default name is included as base endpoint
+            ep_copy["friendlyName"] = clean_default_name
+            result.append(ep_copy)
+
+            # All aliases become alias endpoints
+            for i, alias in enumerate(aliases, start=1):
+                if alias and alias != clean_default_name:
+                    alias_ep = build_alias_endpoint(ep_copy, alias, i)
+                    result.append(alias_ep)
 
     return result
 

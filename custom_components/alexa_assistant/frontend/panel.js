@@ -17,6 +17,7 @@ class AlexaAssistantPanel extends HTMLElement {
     this._hass = null;
     this._exposed = {};
     this._aliases = {}; // entity_id -> string[]
+    this._excludedDefaultNames = {}; // entity_id -> boolean
     this._areas = {}; // entity_id -> area_name
     this._allAreas = [];
     this._allDomains = [];
@@ -81,7 +82,19 @@ class AlexaAssistantPanel extends HTMLElement {
         }
       }
 
-      this._aliases = (aliasesRes && typeof aliasesRes === "object") ? { ...aliasesRes } : {};
+      this._aliases = {};
+      this._excludedDefaultNames = {};
+      if (aliasesRes && typeof aliasesRes === "object") {
+        for (const [entId, val] of Object.entries(aliasesRes)) {
+          if (Array.isArray(val)) {
+            this._aliases[entId] = val;
+            this._excludedDefaultNames[entId] = false;
+          } else if (val && typeof val === "object") {
+            this._aliases[entId] = Array.isArray(val.aliases) ? val.aliases : [];
+            this._excludedDefaultNames[entId] = Boolean(val.exclude_default_name);
+          }
+        }
+      }
       this._areas = {};
       if (Array.isArray(registryRes)) {
         for (const entry of registryRes) {
@@ -143,44 +156,86 @@ class AlexaAssistantPanel extends HTMLElement {
     const rawVal = aliasInput?.value || "";
     const clean = this._sanitize(rawVal);
     if (!clean) {
-      alert("Alias must contain only letters, numbers, and spaces.");
+      alert("O nome deve conter apenas letras, números e espaços.");
       return;
     }
 
+    const isDefaultExcluded = Boolean(this._excludedDefaultNames[entityId]);
     const current = this._aliases[entityId] ? [...this._aliases[entityId]] : [];
-    if (current.length >= 5) {
-      alert("Maximum limit of 5 aliases reached.");
+    const totalNames = (isDefaultExcluded ? 0 : 1) + current.length;
+
+    if (totalNames >= 5) {
+      alert("Limite máximo de 5 nomes atingido.");
       return;
     }
-    if (current.includes(clean)) {
-      alert("This alias is already added.");
+
+    const entityObj = this._getAllValidEntities().find((e) => e.entity_id === entityId);
+    const defaultName = entityObj ? entityObj.alexaName : "";
+
+    if (defaultName && clean.toLowerCase() === defaultName.toLowerCase()) {
+      if (!isDefaultExcluded) {
+        alert("Este nome já está cadastrado.");
+        return;
+      }
+      // Re-enable default name
+      await this._saveAliases(entityId, current, false);
+      if (aliasInput) aliasInput.value = "";
+      return;
+    }
+
+    if (current.some((a) => a.toLowerCase() === clean.toLowerCase())) {
+      alert("Este nome já está cadastrado.");
       return;
     }
 
     current.push(clean);
-    await this._saveAliases(entityId, current);
+    await this._saveAliases(entityId, current, isDefaultExcluded);
     if (aliasInput) aliasInput.value = "";
   }
 
-  async _removeAlias(entityId, aliasToRemove) {
+  async _removeAlias(entityId, aliasToRemove, isDefault) {
+    const isDefaultExcluded = Boolean(this._excludedDefaultNames[entityId]);
     const current = this._aliases[entityId] ? [...this._aliases[entityId]] : [];
-    const updated = current.filter((a) => a !== aliasToRemove);
-    await this._saveAliases(entityId, updated);
+    const totalNames = (isDefaultExcluded ? 0 : 1) + current.length;
+
+    if (totalNames <= 1) {
+      alert("Não é possível remover o único nome.");
+      return;
+    }
+
+    if (isDefault) {
+      await this._saveAliases(entityId, current, true);
+    } else {
+      const updated = current.filter((a) => a !== aliasToRemove);
+      await this._saveAliases(entityId, updated, isDefaultExcluded);
+    }
   }
 
-  async _saveAliases(entityId, aliases) {
+  async _saveAliases(entityId, aliases, excludeDefault) {
     this._updating.add(entityId);
     this._render();
     try {
       await this._hass.callWS({
-        type: "config/entity_registry/update",
+        type: "alexa_assistant/update_aliases",
         entity_id: entityId,
         aliases: aliases,
+        exclude_default_name: Boolean(excludeDefault),
       });
       this._aliases[entityId] = aliases;
+      this._excludedDefaultNames[entityId] = Boolean(excludeDefault);
     } catch (err) {
       console.error(`[AlexaAssistant] Failed to save aliases for ${entityId}:`, err);
-      alert(`Error saving aliases: ${err?.message || err}`);
+      // Fallback to native HA registry update if custom WS command is not yet available
+      try {
+        await this._hass.callWS({
+          type: "config/entity_registry/update",
+          entity_id: entityId,
+          aliases: aliases,
+        });
+        this._aliases[entityId] = aliases;
+      } catch (innerErr) {
+        alert(`Erro ao salvar nomes: ${err?.message || err}`);
+      }
     } finally {
       this._updating.delete(entityId);
       this._render();
@@ -238,6 +293,7 @@ class AlexaAssistantPanel extends HTMLElement {
         const rawName = stateObj.attributes.friendly_name || id;
         const sanitizedName = this._sanitize(rawName) || id;
         const aliases = this._aliases[id] || [];
+        const isDefaultExcluded = Boolean(this._excludedDefaultNames[id]);
         const area = this._areas[id] || "No Area";
         return {
           entity_id: id,
@@ -246,6 +302,7 @@ class AlexaAssistantPanel extends HTMLElement {
           alexaName: sanitizedName,
           area,
           aliases,
+          isDefaultExcluded,
           state: stateObj.state,
           isExposed: this._isExposed(id),
         };
@@ -269,7 +326,7 @@ class AlexaAssistantPanel extends HTMLElement {
       if (this._searchQuery.trim()) {
         const q = this._searchQuery.toLowerCase();
         const matchName = e.name.toLowerCase().includes(q);
-        const matchAlexa = e.alexaName.toLowerCase().includes(q);
+        const matchAlexa = !e.isDefaultExcluded && e.alexaName.toLowerCase().includes(q);
         const matchId = e.entity_id.toLowerCase().includes(q);
         const matchArea = e.area.toLowerCase().includes(q);
         const matchDomain = e.domain.toLowerCase().includes(q);
@@ -639,11 +696,20 @@ class AlexaAssistantPanel extends HTMLElement {
           border: 1px solid var(--panel-pill-border);
           color: var(--panel-pill-text);
           font-size: 12px;
-          padding: 4px 10px;
+          padding: 4px 8px 4px 10px;
           border-radius: 20px;
           display: inline-flex;
           align-items: center;
+          gap: 6px;
           font-weight: 700;
+        }
+        .alias-default-chip .alias-chip-del {
+          color: var(--panel-pill-text);
+          opacity: 0.7;
+        }
+        .alias-default-chip .alias-chip-del:hover {
+          color: var(--error-color, #f87171);
+          opacity: 1;
         }
         .alias-chip {
           background: var(--secondary-background-color, rgba(125, 125, 125, 0.1));
@@ -892,25 +958,28 @@ class AlexaAssistantPanel extends HTMLElement {
                       ${e.isExposed ? `
                         <div style="margin-top:12px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.06); display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
                           <!-- Microphone icon instead of 'Alias' label -->
-                          <span style="display:inline-flex; align-items:center; color:#00e5ff;" title="Voice Aliases">
+                          <span style="display:inline-flex; align-items:center; color:#00e5ff;" title="Nomes de Voz (Alexa)">
                             <svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M12 2A3 3 0 0 0 9 5V11A3 3 0 0 0 12 14A3 3 0 0 0 15 11V5A3 3 0 0 0 12 2M19 11C19 14.53 16.39 17.44 13 17.93V21H11V17.93C7.61 17.44 5 14.53 5 11H7A5 5 0 0 0 12 16A5 5 0 0 0 17 11H19Z"/></svg>
                           </span>
 
-                          <!-- 1st Item: Clean Entity Name (Locked, cannot be removed) -->
-                          <span class="alias-default-chip" title="Base Alexa voice name (permanent)">
-                            <span>${cleanName}</span>
-                          </span>
+                          <!-- 1st Item: Clean Entity Name (if not excluded) -->
+                          ${!e.isDefaultExcluded ? `
+                            <span class="alias-default-chip" title="Nome original da entidade">
+                              <span>${cleanName}</span>
+                              <button class="alias-chip-del" title="Remover nome" data-entity-id="${e.entity_id}" data-is-default="true">×</button>
+                            </span>
+                          ` : ""}
 
                           <!-- Configured secondary aliases -->
-                          ${e.aliases.map((alias, idx) => `
+                          ${e.aliases.map((alias) => `
                             <span class="alias-chip">
-                              ${alias}
-                              <button class="alias-chip-del" title="Remove alias" data-entity-id="${e.entity_id}" data-alias="${alias}">×</button>
+                              <span>${alias}</span>
+                              <button class="alias-chip-del" title="Remover alias" data-entity-id="${e.entity_id}" data-alias="${alias}">×</button>
                             </span>
                           `).join("")}
 
                           <!-- Add alias input with Enter + Check Mark button -->
-                          ${e.aliases.length < 5 ? `
+                          ${((e.isDefaultExcluded ? 0 : 1) + e.aliases.length) < 5 ? `
                             <div class="alias-input-group">
                               <input type="text"
                                 id="${inputId}"
@@ -918,13 +987,13 @@ class AlexaAssistantPanel extends HTMLElement {
                                 placeholder="+ Add alias..."
                                 data-input-entity-id="${e.entity_id}">
                               <button class="alias-btn-check"
-                                title="Add alias"
+                                title="Adicionar alias"
                                 data-btn-add-entity-id="${e.entity_id}">
                                 <svg style="width:14px;height:14px;fill:currentColor;" viewBox="0 0 24 24"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>
                               </button>
                             </div>
                           ` : `
-                            <span style="font-size:11px; color:#f59e0b; font-style:italic;">5/5 reached</span>
+                            <span style="font-size:11px; color:#f59e0b; font-style:italic;">5/5 atingido</span>
                           `}
                         </div>
                       ` : ""}
@@ -1024,8 +1093,9 @@ class AlexaAssistantPanel extends HTMLElement {
     removeButtons.forEach((btn) => {
       btn.addEventListener("click", () => {
         const entityId = btn.getAttribute("data-entity-id");
+        const isDefault = btn.getAttribute("data-is-default") === "true";
         const alias = btn.getAttribute("data-alias");
-        this._removeAlias(entityId, alias);
+        this._removeAlias(entityId, alias, isDefault);
       });
     });
 

@@ -111,6 +111,40 @@ def test_process_discovery_endpoints_sanitizes_and_injects_aliases():
     assert processed[2]["friendlyName"] == "Luz de Teto"
 
 
+def test_process_discovery_endpoints_when_default_name_is_excluded():
+    """Verify default name is excluded and first alias takes the base endpoint."""
+    from custom_components.alexa_assistant.expose import process_discovery_endpoints
+
+    hass = MagicMock()
+    raw_endpoints = [
+        {
+            "endpointId": "light#quintal_luz_grupo",
+            "friendlyName": "Quintal Luz Grupo",
+            "description": "light.quintal_luz_grupo via Home Assistant",
+        }
+    ]
+
+    with patch(
+        "custom_components.alexa_assistant.expose.get_entity_alexa_aliases",
+        return_value=["quintal4", "quintal5"],
+    ), patch(
+        "custom_components.alexa_assistant.expose.is_entity_default_name_excluded",
+        return_value=True,
+    ):
+        processed = process_discovery_endpoints(hass, raw_endpoints)
+
+    # 1 base (quintal4) + 1 alias (quintal5) = 2 endpoints. "Quintal Luz Grupo" must NOT be in endpoints!
+    assert len(processed) == 2
+
+    # Base endpoint has friendlyName of first alias
+    assert processed[0]["endpointId"] == "light#quintal_luz_grupo"
+    assert processed[0]["friendlyName"] == "quintal4"
+
+    # Alias endpoint has second alias
+    assert processed[1]["endpointId"] == "light#quintal_luz_grupo__alias_1"
+    assert processed[1]["friendlyName"] == "quintal5"
+
+
 @pytest.mark.asyncio
 async def test_patched_discovery_handles_alexa_response_nested_structure():
     """Verify patched discovery updates endpoints in response._response['event']['payload']."""
