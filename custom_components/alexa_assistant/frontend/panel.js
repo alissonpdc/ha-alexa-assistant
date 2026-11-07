@@ -9,6 +9,7 @@
  * - Base voice name locked as first item, followed by up to 5 voice aliases
  * - Microphone icon indicator and instant checkmark (+) button for alias submission
  * - Batch Expose All and Hide All buttons
+ * - Mobile responsive: touch-friendly controls, overflow-proof cards, and horizontal filter chips
  */
 class AlexaAssistantPanel extends HTMLElement {
   constructor() {
@@ -27,6 +28,7 @@ class AlexaAssistantPanel extends HTMLElement {
     this._searchQuery = "";
     this._loading = true;
     this._updating = new Set();
+    this._clearedInputs = new Set();
   }
 
   _isDarkMode() {
@@ -181,14 +183,19 @@ class AlexaAssistantPanel extends HTMLElement {
     const entityObj = this._getAllValidEntities().find((e) => e.entity_id === entityId);
     const defaultName = entityObj ? entityObj.alexaName : "";
 
+    const inputId = aliasInput?.id || `alias-input-${entityId.replace(/[^a-zA-Z0-9]/g, "_")}`;
+
     if (defaultName && clean.toLowerCase() === defaultName.toLowerCase()) {
       if (!isDefaultExcluded) {
         alert("This name is already registered.");
         return;
       }
-      // Re-enable default name
-      await this._saveAliases(entityId, current, false);
+      // Re-enable default name and clear field immediately
+      this._clearedInputs.add(inputId);
       if (aliasInput) aliasInput.value = "";
+      await this._saveAliases(entityId, current, false);
+      const postInput = this.shadowRoot?.querySelector(`input[data-input-entity-id="${entityId}"]`);
+      if (postInput) postInput.value = "";
       return;
     }
 
@@ -197,9 +204,20 @@ class AlexaAssistantPanel extends HTMLElement {
       return;
     }
 
+    // Mark input as cleared immediately so re-render never restores the submitted alias
+    this._clearedInputs.add(inputId);
+    if (aliasInput) {
+      aliasInput.value = "";
+    }
+
     current.push(clean);
     await this._saveAliases(entityId, current, isDefaultExcluded);
-    if (aliasInput) aliasInput.value = "";
+
+    // Ensure input in DOM remains empty post-save
+    const postInput = this.shadowRoot?.querySelector(`input[data-input-entity-id="${entityId}"]`);
+    if (postInput) {
+      postInput.value = "";
+    }
   }
 
   async _removeAlias(entityId, aliasToRemove, isDefault) {
@@ -208,7 +226,7 @@ class AlexaAssistantPanel extends HTMLElement {
     const totalNames = (isDefaultExcluded ? 0 : 1) + current.length;
 
     if (totalNames <= 1) {
-      alert("Cannot remove the only name.");
+      alert("Cannot remove the only voice name.");
       return;
     }
 
@@ -249,7 +267,6 @@ class AlexaAssistantPanel extends HTMLElement {
       this._excludedDefaultNames[entityId] = Boolean(excludeDefault);
     } catch (err) {
       console.error(`[AlexaAssistant] Failed to save aliases for ${entityId}:`, err);
-      // Fallback to native HA registry update if custom WS command is not yet available
       try {
         await this._hass.callWS({
           type: "config/entity_registry/update",
@@ -374,9 +391,20 @@ class AlexaAssistantPanel extends HTMLElement {
   _render() {
     if (!this._hass) return;
 
+    // Preserve scroll offsets across DOM re-renders (crucial for mobile touch UX)
+    const prevScrollY = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+    const hostScrollTop = this.scrollTop || 0;
+    const areaList = this.shadowRoot?.getElementById("areaFilterList");
+    const domainList = this.shadowRoot?.getElementById("domainFilterList");
+    const areaScrollLeft = areaList ? areaList.scrollLeft : 0;
+    const domainScrollLeft = domainList ? domainList.scrollLeft : 0;
+
     const activeEl = this.shadowRoot ? this.shadowRoot.activeElement : null;
     const activeId = activeEl ? activeEl.id : null;
-    const activeVal = (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) ? activeEl.value : null;
+    const isCleared = activeId && this._clearedInputs.has(activeId);
+    const activeVal = (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA"))
+      ? (isCleared ? "" : activeEl.value)
+      : null;
     const activeSelStart = activeEl?.selectionStart;
     const activeSelEnd = activeEl?.selectionEnd;
 
@@ -420,20 +448,30 @@ class AlexaAssistantPanel extends HTMLElement {
           color: var(--primary-text-color, #e2e8f0);
           font-family: var(--paper-font-body1_-_font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
           min-height: 100vh;
+          width: 100%;
+          max-width: 100%;
           box-sizing: border-box;
           padding: 24px;
+          overflow-x: hidden;
         }
         * { box-sizing: border-box; }
         .container {
+          width: 100%;
           max-width: 1280px;
           margin: 0 auto;
+          box-sizing: border-box;
+        }
+        @media (max-width: 768px) {
+          :host {
+            padding: 12px 10px;
+          }
         }
         .header {
           display: flex;
           justify-content: space-between;
           align-items: center;
           flex-wrap: wrap;
-          gap: 16px;
+          gap: 12px;
           margin-bottom: 20px;
           padding-bottom: 16px;
           border-bottom: 1px solid var(--divider-color, rgba(255, 255, 255, 0.08));
@@ -441,11 +479,12 @@ class AlexaAssistantPanel extends HTMLElement {
         .header-title {
           display: flex;
           align-items: center;
-          gap: 12px;
+          flex-wrap: wrap;
+          gap: 10px;
         }
         .header-title h1 {
           margin: 0;
-          font-size: 24px;
+          font-size: 22px;
           font-weight: 700;
           color: var(--primary-text-color, #111827);
         }
@@ -478,17 +517,26 @@ class AlexaAssistantPanel extends HTMLElement {
         }
         .area-layout {
           display: grid;
-          grid-template-columns: 280px 1fr;
+          grid-template-columns: 280px minmax(0, 1fr);
           gap: 20px;
+          width: 100%;
+          min-width: 0;
         }
-        @media (max-width: 900px) {
-          .area-layout { grid-template-columns: 1fr; }
+        @media (max-width: 768px) {
+          .area-layout {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+            min-width: 0;
+          }
         }
         .area-sidebar {
           display: flex;
           flex-direction: column;
           gap: 16px;
           height: fit-content;
+          min-width: 0;
         }
         .filter-card {
           background: var(--ha-card-background, var(--card-background-color, #131b2e));
@@ -496,6 +544,7 @@ class AlexaAssistantPanel extends HTMLElement {
           border-radius: var(--ha-card-border-radius, 12px);
           padding: 14px;
           box-shadow: var(--ha-card-box-shadow, 0 2px 6px rgba(0,0,0,0.1));
+          min-width: 0;
         }
         .filter-card-header {
           display: flex;
@@ -523,6 +572,7 @@ class AlexaAssistantPanel extends HTMLElement {
           display: flex;
           flex-direction: column;
           gap: 4px;
+          min-width: 0;
         }
         .area-item-btn {
           display: flex;
@@ -539,6 +589,8 @@ class AlexaAssistantPanel extends HTMLElement {
           font-weight: 500;
           transition: all 0.15s ease;
           text-align: left;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
         }
         .area-item-btn:hover {
           background: var(--secondary-background-color, rgba(125, 125, 125, 0.08));
@@ -555,12 +607,55 @@ class AlexaAssistantPanel extends HTMLElement {
           border-radius: 10px;
           background: var(--divider-color, rgba(125, 125, 125, 0.12));
           color: var(--secondary-text-color, #94a3b8);
+          flex-shrink: 0;
+        }
+        @media (max-width: 768px) {
+          .area-sidebar {
+            gap: 10px;
+          }
+          .filter-card {
+            padding: 10px 12px;
+          }
+          .filter-card-header {
+            padding-bottom: 6px;
+            margin-bottom: 6px;
+          }
+          .filter-item-list {
+            flex-direction: row;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            gap: 6px;
+            padding-bottom: 4px;
+            scrollbar-width: thin;
+          }
+          .filter-item-list::-webkit-scrollbar {
+            height: 4px;
+          }
+          .filter-item-list::-webkit-scrollbar-thumb {
+            background: var(--divider-color, rgba(255, 255, 255, 0.2));
+            border-radius: 4px;
+          }
+          .area-item-btn {
+            flex-shrink: 0;
+            white-space: nowrap;
+            padding: 6px 12px;
+            font-size: 12px;
+            border-radius: 16px;
+            background: var(--ha-card-background, rgba(125, 125, 125, 0.08));
+            border: 1px solid var(--divider-color, rgba(125, 125, 125, 0.15));
+            gap: 6px;
+          }
+          .area-item-btn.active {
+            background: var(--panel-pill-bg, rgba(56, 189, 248, 0.18));
+            border-color: var(--panel-primary-accent, #0284c7);
+            color: var(--panel-pill-text, #38bdf8);
+          }
         }
         .room-header-card {
           background: var(--ha-card-background, var(--card-background-color, #131b2e));
           border: 1px solid var(--ha-card-border-color, var(--divider-color, #334155));
           border-radius: var(--ha-card-border-radius, 12px);
-          padding: 18px 20px;
+          padding: 16px 20px;
           margin-bottom: 16px;
           display: flex;
           justify-content: space-between;
@@ -568,12 +663,14 @@ class AlexaAssistantPanel extends HTMLElement {
           flex-wrap: wrap;
           gap: 12px;
           box-shadow: var(--ha-card-box-shadow, 0 2px 6px rgba(0,0,0,0.1));
+          min-width: 0;
         }
         .room-header-card h2 {
           margin: 0;
           font-size: 19px;
           font-weight: 700;
           color: var(--primary-text-color, #111827);
+          word-break: break-word;
         }
         .room-header-card p {
           margin: 4px 0 0 0;
@@ -590,6 +687,8 @@ class AlexaAssistantPanel extends HTMLElement {
           background: var(--card-background-color, #1e293b);
           color: var(--primary-text-color, #e2e8f0);
           transition: all 0.15s;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
         }
         .btn-sm:hover {
           background: var(--secondary-background-color, #334155);
@@ -608,10 +707,12 @@ class AlexaAssistantPanel extends HTMLElement {
           margin-bottom: 16px;
           align-items: center;
           flex-wrap: wrap;
+          width: 100%;
+          min-width: 0;
         }
         .room-search-bar {
-          flex: 1;
-          min-width: 240px;
+          flex: 1 1 240px;
+          min-width: 0;
           position: relative;
           display: flex;
           align-items: center;
@@ -626,6 +727,7 @@ class AlexaAssistantPanel extends HTMLElement {
           font-size: 13px;
           outline: none;
           transition: border-color 0.2s;
+          box-sizing: border-box;
         }
         .room-search-input:focus {
           border-color: var(--primary-color, #38bdf8);
@@ -645,6 +747,7 @@ class AlexaAssistantPanel extends HTMLElement {
           border-radius: 8px;
           padding: 3px;
           gap: 3px;
+          flex-shrink: 0;
         }
         .room-exposure-btn {
           padding: 6px 14px;
@@ -660,6 +763,8 @@ class AlexaAssistantPanel extends HTMLElement {
           align-items: center;
           gap: 6px;
           transition: all 0.15s ease;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
         }
         .room-exposure-btn:hover {
           color: var(--primary-text-color, #111827);
@@ -669,6 +774,30 @@ class AlexaAssistantPanel extends HTMLElement {
           color: var(--panel-pill-text);
           font-weight: 700;
         }
+        @media (max-width: 600px) {
+          .room-header-card {
+            padding: 12px 14px;
+          }
+          .room-filter-row {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+          }
+          .room-search-bar {
+            width: 100%;
+            flex: none;
+          }
+          .room-exposure-toggle-group {
+            width: 100%;
+            display: flex;
+          }
+          .room-exposure-btn {
+            flex: 1;
+            justify-content: center;
+            padding: 8px 10px;
+            font-size: 12px;
+          }
+        }
         .m3-card {
           background: var(--ha-card-background, var(--card-background-color, #131b2e));
           border: 1px solid var(--ha-card-border-color, var(--divider-color, #1e293b));
@@ -676,6 +805,10 @@ class AlexaAssistantPanel extends HTMLElement {
           padding: 16px;
           transition: all 0.2s ease;
           box-shadow: var(--ha-card-box-shadow, 0 1px 3px rgba(0,0,0,0.08));
+          width: 100%;
+          min-width: 0;
+          overflow: hidden;
+          box-sizing: border-box;
         }
         .m3-card.exposed {
           border-left: 5px solid var(--primary-color, #00e5ff);
@@ -684,16 +817,41 @@ class AlexaAssistantPanel extends HTMLElement {
           border-left: 5px solid var(--secondary-text-color, #475569);
           opacity: 0.88;
         }
+        .card-main-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 12px;
+          width: 100%;
+          min-width: 0;
+        }
+        .card-info-col {
+          flex: 1 1 auto;
+          min-width: 0;
+          overflow: hidden;
+        }
+        .card-badges-row {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 6px;
+          margin-bottom: 6px;
+        }
         .entity-title {
           font-weight: 600;
           font-size: 15px;
           color: var(--primary-text-color, #111827);
+          word-break: break-word;
+          overflow-wrap: anywhere;
+          line-height: 1.35;
         }
         .entity-id-sub {
-          font-size: 12px;
+          font-size: 11px;
           font-family: monospace;
           color: var(--secondary-text-color, #64748b);
           margin-top: 3px;
+          word-break: break-all;
+          overflow-wrap: anywhere;
         }
         .domain-tag {
           font-size: 10px;
@@ -705,6 +863,7 @@ class AlexaAssistantPanel extends HTMLElement {
           border-radius: 4px;
           font-weight: 700;
           letter-spacing: 0.04em;
+          flex-shrink: 0;
         }
         .area-tag {
           font-size: 11px;
@@ -714,117 +873,51 @@ class AlexaAssistantPanel extends HTMLElement {
           padding: 2px 8px;
           border-radius: 10px;
           font-weight: 600;
+          flex-shrink: 0;
         }
-        .alias-default-chip {
-          background: var(--panel-pill-bg);
-          border: 1px solid var(--panel-pill-border);
-          color: var(--panel-pill-text);
-          font-size: 12px;
-          padding: 4px 8px 4px 10px;
-          border-radius: 20px;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          font-weight: 700;
-        }
-        .alias-default-chip .alias-chip-del {
-          color: var(--panel-pill-text);
-          opacity: 0.7;
-        }
-        .alias-default-chip .alias-chip-del:hover {
-          color: var(--error-color, #f87171);
-          opacity: 1;
-        }
-        .alias-add-original-btn {
-          background: rgba(0, 229, 255, 0.08);
-          border: 1px dashed var(--panel-pill-border, rgba(0, 229, 255, 0.4));
-          color: var(--panel-pill-text, #00e5ff);
-          font-size: 11px;
-          font-weight: 600;
-          padding: 3px 10px;
-          border-radius: 20px;
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          transition: all 0.15s ease;
-        }
-        .alias-add-original-btn:hover {
-          background: var(--panel-pill-bg, rgba(0, 229, 255, 0.18));
-          border-style: solid;
-        }
-        .alias-chip {
-          background: var(--secondary-background-color, rgba(125, 125, 125, 0.1));
-          border: 1px solid var(--divider-color, rgba(125, 125, 125, 0.2));
-          color: var(--primary-text-color, #e2e8f0);
-          font-size: 12px;
-          padding: 4px 8px 4px 10px;
-          border-radius: 20px;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-        }
-        .alias-chip-del {
-          background: none;
-          border: none;
-          color: var(--secondary-text-color, #94a3b8);
-          cursor: pointer;
-          font-size: 14px;
-          line-height: 1;
-          padding: 0;
+        .card-toggle-col {
           display: flex;
           align-items: center;
+          gap: 8px;
+          flex-shrink: 0;
+          margin-top: 2px;
         }
-        .alias-chip-del:hover {
-          color: var(--error-color, #f87171);
-        }
-        .alias-input-group {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-        }
-        .grid-inline-input {
-          background: var(--primary-background-color, #ffffff);
-          border: 1px solid var(--divider-color, #e2e8f0);
-          color: var(--primary-text-color, #111827);
+        .status-label {
           font-size: 12px;
-          padding: 4px 8px;
-          border-radius: 4px;
-          outline: none;
-          width: 140px;
+          font-weight: 600;
         }
-        .grid-inline-input:focus {
-          border-color: var(--primary-color, #38bdf8);
+        .status-label.exposed {
+          color: #10b981;
         }
-        .alias-btn-check {
-          background: var(--panel-btn-primary-bg);
-          border: none;
-          border-radius: 4px;
-          color: var(--panel-primary-accent-contrast);
-          cursor: pointer;
-          width: 26px;
-          height: 26px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          transition: opacity 0.15s;
+        .status-label.hidden {
+          color: #64748b;
         }
-        .alias-btn-check:hover {
-          opacity: 0.9;
-        }
+        /* Mobile Touch-proof Toggle Switch */
         .switch {
           position: relative;
           display: inline-block;
           width: 44px;
           height: 24px;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
         }
         .switch input {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          margin: 0;
           opacity: 0;
-          width: 0;
-          height: 0;
+          cursor: pointer;
+          z-index: 2;
+          -webkit-appearance: none;
+          appearance: none;
+          touch-action: manipulation;
         }
         .slider {
           position: absolute;
-          cursor: pointer;
+          pointer-events: none;
           top: 0; left: 0; right: 0; bottom: 0;
           background-color: var(--secondary-text-color, #334155);
           transition: 0.25s;
@@ -846,6 +939,161 @@ class AlexaAssistantPanel extends HTMLElement {
         }
         input:checked + .slider:before {
           transform: translateX(20px);
+        }
+
+        /* Voice Aliases row */
+        .alias-container {
+          margin-top: 12px;
+          padding-top: 10px;
+          border-top: 1px solid var(--divider-color, rgba(255, 255, 255, 0.06));
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          min-width: 0;
+        }
+        .alias-default-chip {
+          background: var(--panel-pill-bg);
+          border: 1px solid var(--panel-pill-border);
+          color: var(--panel-pill-text);
+          font-size: 12px;
+          padding: 4px 8px 4px 10px;
+          border-radius: 20px;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-weight: 700;
+          max-width: 100%;
+          box-sizing: border-box;
+          touch-action: manipulation;
+        }
+        .alias-chip {
+          background: var(--secondary-background-color, rgba(125, 125, 125, 0.1));
+          border: 1px solid var(--divider-color, rgba(125, 125, 125, 0.2));
+          color: var(--primary-text-color, #e2e8f0);
+          font-size: 12px;
+          padding: 4px 8px 4px 10px;
+          border-radius: 20px;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          max-width: 100%;
+          box-sizing: border-box;
+          touch-action: manipulation;
+        }
+        .alias-chip-text {
+          max-width: 180px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        @media (max-width: 480px) {
+          .alias-chip-text {
+            max-width: 120px;
+          }
+        }
+        .alias-chip-del {
+          background: none;
+          border: none;
+          color: var(--secondary-text-color, #94a3b8);
+          cursor: pointer;
+          font-size: 16px;
+          line-height: 1;
+          padding: 4px;
+          min-width: 24px;
+          min-height: 24px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .alias-chip-del:hover {
+          color: var(--error-color, #f87171);
+          background: rgba(248, 113, 113, 0.1);
+        }
+        .alias-default-chip .alias-chip-del {
+          color: var(--panel-pill-text);
+          opacity: 0.7;
+        }
+        .alias-default-chip .alias-chip-del:hover {
+          color: var(--error-color, #f87171);
+          opacity: 1;
+        }
+        .alias-add-original-btn {
+          background: rgba(0, 229, 255, 0.08);
+          border: 1px dashed var(--panel-pill-border, rgba(0, 229, 255, 0.4));
+          color: var(--panel-pill-text, #00e5ff);
+          font-size: 11px;
+          font-weight: 600;
+          padding: 5px 10px;
+          min-height: 28px;
+          border-radius: 20px;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          transition: all 0.15s ease;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .alias-add-original-btn:hover {
+          background: var(--panel-pill-bg, rgba(0, 229, 255, 0.18));
+          border-style: solid;
+        }
+        .alias-input-group {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          max-width: 100%;
+        }
+        @media (max-width: 480px) {
+          .alias-input-group {
+            width: 100%;
+          }
+        }
+        .grid-inline-input {
+          background: var(--primary-background-color, #ffffff);
+          border: 1px solid var(--divider-color, #e2e8f0);
+          color: var(--primary-text-color, #111827);
+          font-size: 12px;
+          padding: 6px 10px;
+          height: 32px;
+          border-radius: 6px;
+          outline: none;
+          width: 140px;
+          box-sizing: border-box;
+        }
+        .grid-inline-input:focus {
+          border-color: var(--primary-color, #38bdf8);
+        }
+        @media (max-width: 480px) {
+          .grid-inline-input {
+            flex: 1;
+            width: auto;
+            min-width: 100px;
+          }
+        }
+        .alias-btn-check {
+          background: var(--panel-btn-primary-bg);
+          border: none;
+          border-radius: 6px;
+          color: var(--panel-primary-accent-contrast);
+          cursor: pointer;
+          width: 32px;
+          height: 32px;
+          min-width: 32px;
+          min-height: 32px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          transition: opacity 0.15s;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .alias-btn-check:hover {
+          opacity: 0.9;
         }
       </style>
 
@@ -876,7 +1124,7 @@ class AlexaAssistantPanel extends HTMLElement {
                 </div>
                 <span class="area-badge">${allRooms.length} rooms</span>
               </div>
-              <div class="filter-item-list">
+              <div class="filter-item-list" id="areaFilterList">
                 <button class="area-item-btn ${this._activeArea === "all" ? "active" : ""}" data-area-btn="all">
                   <span>All Areas</span>
                   <span class="area-badge">${allEntities.filter((e) => e.isExposed).length}/${allEntities.length}</span>
@@ -903,7 +1151,7 @@ class AlexaAssistantPanel extends HTMLElement {
                 </div>
                 <span class="area-badge">${availableDomains.length} types</span>
               </div>
-              <div class="filter-item-list">
+              <div class="filter-item-list" id="domainFilterList">
                 <button class="area-item-btn ${this._activeDomain === "all" ? "active" : ""}" data-domain-btn="all">
                   <span>All Types</span>
                   <span class="area-badge">${areaScopedEntities.filter((e) => e.isExposed).length}/${areaScopedEntities.length}</span>
@@ -923,7 +1171,7 @@ class AlexaAssistantPanel extends HTMLElement {
           </div>
 
           <!-- Main Devices Explorer -->
-          <div>
+          <div style="min-width:0;">
             <!-- Header Card with Expose All / Hide All for current scope -->
             <div class="room-header-card">
               <div>
@@ -931,8 +1179,8 @@ class AlexaAssistantPanel extends HTMLElement {
                 <p>${totalExposedInView} of ${filtered.length} devices currently exposed to Alexa</p>
               </div>
               <div style="display:flex; gap:10px; align-items:center;">
-                <button class="btn-sm btn-sm-primary" id="btnExposeAll" onclick="void(0)">Expose All</button>
-                <button class="btn-sm" id="btnHideAll" onclick="void(0)">Hide All</button>
+                <button class="btn-sm btn-sm-primary" id="btnExposeAll">Expose All</button>
+                <button class="btn-sm" id="btnHideAll">Hide All</button>
               </div>
             </div>
 
@@ -970,24 +1218,24 @@ class AlexaAssistantPanel extends HTMLElement {
                 <p style="font-size:13px; margin-top:4px;">Try clearing the search query or selecting "All" in the filters.</p>
               </div>
             ` : `
-              <div style="display:flex; flex-direction:column; gap:12px;">
+              <div style="display:flex; flex-direction:column; gap:12px; min-width:0;">
                 ${filtered.map((e) => {
                   const cleanName = e.alexaName;
                   const inputId = `alias-input-${e.entity_id.replace(/[^a-zA-Z0-9]/g, "_")}`;
                   return `
                     <div class="m3-card ${e.isExposed ? "exposed" : "hidden"}">
-                      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                        <div>
-                          <div style="display:flex; align-items:center; gap:8px;">
+                      <div class="card-main-row">
+                        <div class="card-info-col">
+                          <div class="card-badges-row">
                             <span class="area-tag">${e.area}</span>
                             <span class="domain-tag">${e.domain}</span>
-                            <span class="entity-title">${e.name}</span>
                           </div>
+                          <div class="entity-title">${e.name}</div>
                           <div class="entity-id-sub">${e.entity_id}</div>
                         </div>
 
-                        <div style="display:flex; align-items:center; gap:10px;">
-                          <span style="font-size:12px; font-weight:600; color:${e.isExposed ? "#10b981" : "#64748b"};">${e.isExposed ? "Exposed" : "Hidden"}</span>
+                        <div class="card-toggle-col">
+                          <span class="status-label ${e.isExposed ? "exposed" : "hidden"}">${e.isExposed ? "Exposed" : "Hidden"}</span>
                           <label class="switch">
                             <input type="checkbox" data-entity-id="${e.entity_id}" ${e.isExposed ? "checked" : ""} ${this._updating.has(e.entity_id) ? "disabled" : ""}>
                             <span class="slider"></span>
@@ -997,16 +1245,16 @@ class AlexaAssistantPanel extends HTMLElement {
 
                       <!-- ALIAS MANAGER (ONLY WHEN EXPOSED) -->
                       ${e.isExposed ? `
-                        <div style="margin-top:12px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.06); display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
-                          <!-- Microphone icon instead of 'Alias' label -->
-                          <span style="display:inline-flex; align-items:center; color:#00e5ff;" title="Voice Names (Alexa)">
+                        <div class="alias-container">
+                          <!-- Microphone icon indicator -->
+                          <span style="display:inline-flex; align-items:center; color:#00e5ff; flex-shrink:0;" title="Voice Names (Alexa)">
                             <svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M12 2A3 3 0 0 0 9 5V11A3 3 0 0 0 12 14A3 3 0 0 0 15 11V5A3 3 0 0 0 12 2M19 11C19 14.53 16.39 17.44 13 17.93V21H11V17.93C7.61 17.44 5 14.53 5 11H7A5 5 0 0 0 12 16A5 5 0 0 0 17 11H19Z"/></svg>
                           </span>
 
                           <!-- 1st Item: Clean Entity Name (if not excluded) -->
                           ${!e.isDefaultExcluded ? `
                             <span class="alias-default-chip" title="Original entity name">
-                              <span>${cleanName}</span>
+                              <span class="alias-chip-text">${cleanName}</span>
                               <button class="alias-chip-del" title="Remove name" data-entity-id="${e.entity_id}" data-is-default="true">×</button>
                             </span>
                           ` : `
@@ -1019,7 +1267,7 @@ class AlexaAssistantPanel extends HTMLElement {
                           <!-- Configured secondary aliases -->
                           ${e.aliases.map((alias) => `
                             <span class="alias-chip">
-                              <span>${alias}</span>
+                              <span class="alias-chip-text">${alias}</span>
                               <button class="alias-chip-del" title="Remove alias" data-entity-id="${e.entity_id}" data-alias="${alias}">×</button>
                             </span>
                           `).join("")}
@@ -1058,7 +1306,10 @@ class AlexaAssistantPanel extends HTMLElement {
     if (activeId && activeId !== "searchInput") {
       const restored = this.shadowRoot.getElementById(activeId);
       if (restored) {
-        if (activeVal !== null && restored.value !== activeVal) {
+        if (this._clearedInputs.has(activeId)) {
+          restored.value = "";
+          this._clearedInputs.delete(activeId);
+        } else if (activeVal !== null && restored.value !== activeVal) {
           restored.value = activeVal;
         }
         restored.focus();
@@ -1067,6 +1318,24 @@ class AlexaAssistantPanel extends HTMLElement {
         }
       }
     }
+
+    // Restore scroll positions so mobile screen does not jump to top on tap/toggle
+    requestAnimationFrame(() => {
+      if (typeof prevScrollY === "number" && prevScrollY > 0) {
+        window.scrollTo(0, prevScrollY);
+      }
+      if (typeof hostScrollTop === "number" && hostScrollTop > 0) {
+        this.scrollTop = hostScrollTop;
+      }
+      const newAreaList = this.shadowRoot?.getElementById("areaFilterList");
+      if (newAreaList && areaScrollLeft > 0) {
+        newAreaList.scrollLeft = areaScrollLeft;
+      }
+      const newDomainList = this.shadowRoot?.getElementById("domainFilterList");
+      if (newDomainList && domainScrollLeft > 0) {
+        newDomainList.scrollLeft = domainScrollLeft;
+      }
+    });
   }
 
   _bindEvents() {

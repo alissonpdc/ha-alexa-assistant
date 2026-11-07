@@ -99,6 +99,16 @@ def test_panel_js_contains_refined_ux_model():
     # Assert Unicode letters support in sanitize
     assert r"\p{L}" in content
 
+    # Assert mobile compatibility and input clearing on add
+    assert "_clearedInputs" in content
+    assert "card-main-row" in content
+    assert "card-info-col" in content
+    assert "card-toggle-col" in content
+    assert "touch-action: manipulation" in content
+    assert "pointer-events: none" in content
+    assert "areaFilterList" in content
+    assert "domainFilterList" in content
+
 
 async def test_async_unregister_alexa_panel_removes_panel(setup_mock_ha_modules):
     """Verify panel unregistration removes panel from frontend."""
