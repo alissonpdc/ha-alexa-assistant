@@ -30,6 +30,8 @@ When using the official self-hosted/manual Alexa Smart Home integration (`alexa:
 - **Real-Time Synchronization**: Changes take effect immediately without restarting Home Assistant.
 - **Zero YAML Filters Required**: No static lists in `configuration.yaml`.
 
+![Alexa Assistant](alexa-assistant.png)
+
 ---
 
 ## Setup Guide
